@@ -468,6 +468,8 @@ namespace netDxf
         {
             get { return this.entities; }
         }
+        
+        public List<AcdsRecord> AcdsRecords { get; internal set; }
 
         #endregion
 

@@ -88,6 +88,9 @@ namespace netDxf.IO
         private DictionaryObject namedDictionary;
         // <string: dictionary handle, DictionaryObject: dictionary>
         private Dictionary<string, DictionaryObject> dictionaries;
+        
+        // AcdsData section containing Acis binary data
+        private List<AcdsRecord> acdsRecords;
 
         // variables for post-processing
         private Dictionary<Leader, string> leaderAnnotation;
@@ -248,6 +251,7 @@ namespace netDxf.IO
             this.underlayDefHandles = new Dictionary<string, UnderlayDefinition>();
             this.layerStateManagerDictionaryHandle = string.Empty;
             this.xRecords = new Dictionary<string, XRecord>() ;
+            this.acdsRecords = new List<AcdsRecord>();
 
 
             // for layouts errors workarounds
@@ -331,6 +335,8 @@ namespace netDxf.IO
             this.doc.MlineStyles.Add(MLineStyle.Default);
 
             this.doc.Entities.ActiveLayout = Layout.ModelSpaceName;
+            
+            this.doc.AcdsRecords = this.acdsRecords;
 
             return this.doc;
         }
@@ -1177,10 +1183,21 @@ namespace netDxf.IO
             while (this.chunk.ReadString() != DxfObjectCode.EndSection)
             {
                 //read the ACDSSCHEMA and ACDSRECORD, multiple entries
-                do
+                switch (this.chunk.ReadString())
                 {
-                    this.chunk.Next();
-                } while (this.chunk.Code != 0);
+                    case "ACDSRECORD":
+                        AcdsRecord record = this.ReadAcdsRecord();
+                        if(record != null)
+                        this.acdsRecords.Add(record);
+                        break;
+                    default:
+                        do
+                        {
+                            this.chunk.Next();
+                        } while (this.chunk.Code != 0);
+                        break;
+                }
+                
             }
         }
 
@@ -10052,6 +10069,66 @@ namespace netDxf.IO
             this.doc.UnderlayDgnDefinitions = new UnderlayDgnDefinitions(this.doc, underlayDgnDefsHandle);
             this.doc.UnderlayDwfDefinitions = new UnderlayDwfDefinitions(this.doc, underlayDwfDefsHandle);
             this.doc.UnderlayPdfDefinitions = new UnderlayPdfDefinitions(this.doc, underlayPdfDefsHandle);
+        }
+
+        private AcdsRecord ReadAcdsRecord()
+        {
+            this.chunk.Next();
+            while (this.chunk.Code != 0)
+            {
+                switch (this.chunk.Code)
+                {
+                    case 2:
+                        if (!this.chunk.Value.Equals("ASM_Data"))
+                        {
+                            this.chunk.Next();
+                            break;
+                        }
+                        // Unknown data
+                        this.chunk.Next();
+                        
+                        
+                        this.chunk.Next();
+                        int length = this.chunk.ReadInt();
+                        this.chunk.Next();
+
+                        byte[] acisData = new byte[0];
+                        while (this.chunk.Code == 310)
+                        {
+                            acisData = acisData.Concat(this.chunk.ReadBytes()).ToArray();
+                            this.chunk.Next();
+                        }
+
+                        AcdsRecord record = new AcdsRecord(null)
+                        {
+                            Length = length,
+                            AcisData = acisData
+                        };
+
+                        return record;
+                    default:
+                        this.chunk.Next();
+                        break;
+                }
+            }
+
+            return null;
+        }
+        
+        public static byte[] HexStringToByteArray(string hex)
+        {
+            if (string.IsNullOrEmpty(hex))
+                throw new ArgumentException("Hex string cannot be null or empty.", nameof(hex));
+
+            if (hex.Length % 2 != 0)
+                throw new ArgumentException("Hex string must have an even length.", nameof(hex));
+
+            byte[] bytes = new byte[hex.Length / 2];
+            for (int i = 0; i < hex.Length; i += 2)
+            {
+                bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
+            }
+            return bytes;
         }
 
         private DictionaryObject ReadDictionary()
